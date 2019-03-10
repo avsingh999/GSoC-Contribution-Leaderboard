@@ -16,7 +16,7 @@ def showGsocUser(request):
         lastUpdated = ''
     users = sortUser(User.objects.filter(gsoc=True), sort, _gsoc = True)
     data = serializers.serialize('json', list(users), fields=(
-        'login', 'id', 'avatar', 'totalCommits', 'gsoc', 'totalPRs', 'totalIssues'))
+        'login', 'id', 'avatar', 'totalMergedPRs', 'gsoc', 'totalOpenPRs', 'totalIssues'))
     context = {
         'users': json.loads(data),
         'updated': lastUpdated,

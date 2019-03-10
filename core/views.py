@@ -14,7 +14,6 @@ from .models import User, LastUpdate, Repository
 AUTH_TOKEN = settings.GITHUB_AUTH_TOKEN
 BASE_URL = settings.API_BASE_URL
 ORG = settings.ORGANIZATION
-NUM = 0
 
 
 def github():
@@ -52,25 +51,21 @@ def getOrganizationContributors(repoList):
             newRepo = Repository(repo=repo_['name'], owner=repo_['owner']['login'], openIssues=repo_['open_issues'],
                                  include=True)
             newRepo.save()
-        else:
-            if currRepo[0].openIssues != repo_['open_issues'] and currRepo[0].include:
-                currRepo.update(openIssues=repo_['open_issues'])
-                issueRepos += currRepo
+        elif currRepo[0].openIssues != repo_['open_issues'] and currRepo[0].include:
+            currRepo.update(openIssues=repo_['open_issues'])
+            issueRepos += currRepo
+        elif currRepo[0].include:
+            issueRepos += currRepo
 
-    forIssues = json.loads(serializers.serialize('json', list(issueRepos), fields=('owner', 'repo')))
+    forIssues = json.loads(serializers.serialize(
+        'json', list(issueRepos), fields=('owner', 'repo')))
     for repo_ in forIssues:
         owner = repo_['fields']['owner']
         repoName = repo_['fields']['repo']
         contributors = getRepoIssues(owner, repoName, contributors)
         contributors = getRepoPR(owner, repoName, contributors)
-        contributors = getRepoContributors(owner, repoName, contributors)
 
     updateDataBase(contributors)
-
-    # contributors = saveUser(userList, contributors)
-    # contributors = savePRs(pullReq, contributors)
-    # contributors = saveIssues(issues, contributors)
-
     return contributors != {}
 
 
@@ -79,57 +74,42 @@ def updateDataBase(contributors):
         currUser = User.objects.filter(login=user)
         if currUser:
             currUser.update(
-                totalPRs=contributors[user]['PR_counts'],
-                totalCommits=contributors[user]['commits'],
+                totalOpenPRs=contributors[user]['open_prs'],
+                totalMergedPRs=contributors[user]['merged_prs'],
                 totalIssues=contributors[user]['issue_counts']
             )
         else:
             newUser = User(
                 login=user,
                 avatar=contributors[user]['avatar_url'],
-                totalPRs=contributors[user]['PR_counts'],
-                totalCommits=contributors[user]['commits'],
+                totalOpenPRs=contributors[user]['open_prs'],
+                totalMergedPRs=contributors[user]['merged_prs'],
                 totalIssues=contributors[user]['issue_counts']
             )
             newUser.save()
 
 
-def getRepoContributors(owner, repoName, contributors_, url=''):
-    contributors = contributors_
-    if not url:
-        url = BASE_URL + 'repos/%s/%s/contributors?per_page=100' % (
-            owner, repoName)
-    response = requests.get(
-        url, headers={"Authorization": "token " + AUTH_TOKEN})
-    if (response.status_code == 200):  # 200 = SUCCESS
-        users = response.json()
-        saveUser(users, contributors)
-        if 'next' in response.links:
-            contributors = getRepoContributors(owner,
-                                               repoName,
-                                               contributors_,
-                                               response.links['next']['url'])
-    return contributors
-
-
 def getRepoPR(owner, repoName, contributors_, url=''):
     contributors = contributors_
     if not url:
-        url = BASE_URL + 'repos/%s/%s/pulls?per_page=100' % (owner, repoName)
+        url = BASE_URL + \
+            'repos/%s/%s/pulls?per_page=100&state=all' % (owner, repoName)
     response = requests.get(
         url, headers={"Authorization": "token " + AUTH_TOKEN})
     if (response.status_code == 200):  # 200 = SUCCESS
         pulls = response.json()
         savePRs(pulls, contributors)
         if 'next' in response.links:
-            contributors = getRepoPR(owner, repoName, contributors, response.links['next']['url'])
+            contributors = getRepoPR(
+                owner, repoName, contributors, response.links['next']['url'])
     return contributors
 
 
 def getRepoIssues(owner, repoName, contributors_, url=''):
     contributors = contributors_
     if not url:
-        url = BASE_URL + 'repos/%s/%s/issues?per_page=100' % (owner, repoName)
+        url = BASE_URL + \
+            'repos/%s/%s/issues?per_page=100&state=all' % (owner, repoName)
     response = requests.get(
         url, headers={"Authorization": "token " + AUTH_TOKEN})
     if (response.status_code == 200):  # 200 = SUCCESS
@@ -149,11 +129,11 @@ def saveUser(userList, contributors):
         username = user['login'].lower()
         commits = user['contributions']
         if username in contributors:
-            contributors[username]['commits'] += commits
+            contributors[username]['merged_prs'] += commits
         else:
             contributors[username] = {}
-            contributors[username]['commits'] = commits
-            contributors[username]['PR_counts'] = 0
+            contributors[username]['merged_prs'] = commits
+            contributors[username]['open_prs'] = 0
             contributors[username]['issue_counts'] = 0
             contributors[username]['avatar_url'] = user['avatar_url']
     return contributors
@@ -165,12 +145,22 @@ def savePRs(pullReq, contributors_):
         if 'open' == pull['state']:
             username = pull['user']['login'].lower()
             if username in contributors:
-                contributors[username]['PR_counts'] += 1
+                contributors[username]['open_prs'] += 1
             else:
                 contributors[username] = {}
-                contributors[username]['PR_counts'] = 1
+                contributors[username]['open_prs'] = 1
                 contributors[username]['issue_counts'] = 0
-                contributors[username]['commits'] = 0
+                contributors[username]['merged_prs'] = 0
+                contributors[username]['avatar_url'] = pull['user']['avatar_url']
+        if 'closed' == pull['state'] and not pull['merged_at'] is None:
+            username = pull['user']['login'].lower()
+            if username in contributors:
+                contributors[username]['merged_prs'] += 1
+            else:
+                contributors[username] = {}
+                contributors[username]['open_prs'] = 0
+                contributors[username]['issue_counts'] = 0
+                contributors[username]['merged_prs'] = 1
                 contributors[username]['avatar_url'] = pull['user']['avatar_url']
 
     return contributors
@@ -179,15 +169,16 @@ def savePRs(pullReq, contributors_):
 def saveIssues(issues, contributors_):
     contributors = contributors_
     for issue in issues:
-        username = issue['user']['login'].lower()
-        if username in contributors:
-            contributors[username]['issue_counts'] += 1
-        else:
-            contributors[username] = {}
-            contributors[username]['issue_counts'] = 1
-            contributors[username]['PR_counts'] = 0
-            contributors[username]['commits'] = 0
-            contributors[username]['avatar_url'] = issue['user']['avatar_url']
+        if not 'pull_request' in issue:
+            username = issue['user']['login'].lower()
+            if username in contributors:
+                contributors[username]['issue_counts'] += 1
+            else:
+                contributors[username] = {}
+                contributors[username]['issue_counts'] = 1
+                contributors[username]['open_prs'] = 0
+                contributors[username]['merged_prs'] = 0
+                contributors[username]['avatar_url'] = issue['user']['avatar_url']
 
     return contributors
 
@@ -203,7 +194,7 @@ def showAll(request):
     users = sortUser(User.objects.all(), sort)
 
     data = serializers.serialize('json', list(users), fields=(
-        'login', 'id', 'avatar', 'totalCommits', 'gsoc', 'totalPRs', 'totalIssues'))
+        'login', 'id', 'avatar', 'totalMergedPRs', 'gsoc', 'totalOpenPRs', 'totalIssues'))
     context = {
         'users': json.loads(data),
         'updated': lastUpdated,
@@ -212,19 +203,19 @@ def showAll(request):
 
 
 def sortUser(_User, key, _gsoc=False):
-    if key == 'c':
-        return _User.order_by('-totalCommits')
+    if key == 'm':
+        return _User.order_by('-totalMergedPRs')
     if key == 'p':
-        return _User.order_by('-totalPRs')
+        return _User.order_by('-totalOpenPRs')
     if key == 'i':
         return _User.order_by('-totalIssues')
     if _gsoc:  # defalut case for gsoc
         return User.objects.filter(gsoc=_gsoc).extra(
-            select={'count': 'totalCommits + totalPRs + totalIssues'},
+            select={'count': 'totalMergedPRs + totalOpenPRs'},
             order_by=('-count',),
         )
     else:  # default case for all
         return User.objects.extra(
-            select={'count': 'totalCommits + totalPRs + totalIssues'},
+            select={'count': 'totalMergedPRs + totalOpenPRs'},
             order_by=('-count',),
         )

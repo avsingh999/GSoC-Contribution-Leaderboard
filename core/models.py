@@ -5,8 +5,8 @@ from django.contrib.postgres.fields import ArrayField
 class User(models.Model):
     login = models.TextField(unique=True, null=False)
     avatar = models.TextField(null=True)
-    totalCommits = models.IntegerField(default=0)
-    totalPRs = models.IntegerField(default=0)
+    totalMergedPRs = models.IntegerField(default=0)
+    totalOpenPRs = models.IntegerField(default=0)
     totalIssues = models.IntegerField(default=0)
     # TODO: Add user details for individual repos
     # repos = ArrayField(models.TextField(),size= 10, null=True, blank=True,)

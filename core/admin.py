@@ -4,10 +4,8 @@ from django.conf import settings
 import requests
 import json
 
-
 AUTH_TOKEN = settings.GITHUB_AUTH_TOKEN
 BASE_URL = settings.API_BASE_URL
-
 
 def mark_gsoc(modeladmin, request, queryset):
     queryset.update(gsoc=True)
@@ -40,7 +38,7 @@ remove_repo.short_description = "Remove Repository"
 class UserAdmin(admin.ModelAdmin):
     list_display = ['login', 'gsoc']
     readonly_fields = ['avatar',
-                       'totalCommits', 'totalPRs', 'totalIssues']
+                       'totalOpenPRs', 'totalMergedPRs', 'totalIssues']
     list_filter = ['gsoc']
     search_fields = ['login']
     actions = [mark_gsoc, unmark_gsoc]
